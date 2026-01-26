@@ -258,12 +258,7 @@ export default function ChatPage() {
             <li>-Typing indicator works live</li>
             <li>-Online / Offline status updates live</li>
             <li>-Last seen updates on inactivity or logout</li>
-            <li>
-              <b>-Refresh page to update read receipt status
-
-                
-              </b>
-            </li>
+            <li>-Read receipt status works live</li>
           </ul>
           
         </div>
