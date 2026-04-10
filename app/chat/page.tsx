@@ -24,6 +24,13 @@ type Conversation = {
   lastSeen: number | null;
 };
 
+type AnalysisResult = {
+  score: number;
+  keyMoments: string[];
+  coachingTip: string;
+  analyzedAt: string;
+};
+
 export default function ChatPage() {
   const socketRef = useRef<Socket | null>(null);
   const activeConvRef = useRef<Conversation | null>(null);
@@ -34,6 +41,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
   const [typingUser, setTypingUser] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
 
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -166,6 +175,15 @@ export default function ChatPage() {
       );
     });
 
+    // AI analysis result socket event
+    socket.on(
+      "conversation_analysis",
+      (data: { analysis: AnalysisResult; analyzedAt: string }) => {
+        setAnalysis({ ...data.analysis, analyzedAt: data.analyzedAt });
+        setAnalyzing(false);
+      },
+    );
+
     return () => {
       socket.disconnect();
     };
@@ -173,6 +191,7 @@ export default function ChatPage() {
 
   const openConversation = async (conv: Conversation) => {
     setActiveConv(conv);
+    setAnalysis(null); // clear old analysis on conv switch
     const res = await API.get(
       `/api/conversations/${conv.conversationId}/messages`,
     );
@@ -240,17 +259,30 @@ export default function ChatPage() {
     }, 1200);
   };
 
+  const analyzeConversation = async () => {
+    if (!activeConv) return;
+    setAnalyzing(true);
+    setAnalysis(null);
+    await API.post(`/api/conversations/${activeConv.conversationId}/analyze`);
+    // result will arrive via socket event "conversation_analysis"
+  };
+
   const formatLastSeen = (timestamp: number | null) => {
     if (!timestamp) return "";
     const date = new Date(timestamp);
     return date.toLocaleString();
   };
 
+  const scoreColor = (score: number) => {
+    if (score >= 7) return "#22c55e";
+    if (score >= 4) return "#f59e0b";
+    return "#ef4444";
+  };
+
   return (
     <div className="flex h-screen">
       {/* LEFT PANEL */}
       <div className="w-72 border-r p-3 bg-white space-y-4">
-        {/* Recruiter Instructions */}
         <div className="p-3 rounded bg-blue-50 border text-xs text-gray-700">
           <div className="font-semibold mb-1">Basic Instructions</div>
           <ul className="list-disc ml-4 space-y-1">
@@ -260,7 +292,6 @@ export default function ChatPage() {
             <li>-Last seen updates on inactivity or logout</li>
             <li>-Read receipt status works live</li>
           </ul>
-          
         </div>
 
         <h2 className="font-bold mb-3">Chats</h2>
@@ -268,7 +299,11 @@ export default function ChatPage() {
         {conversations.map((c) => {
           const other = c.participants.find((p) => p._id !== myId);
           return (
-            <div key={c.conversationId} className="p-2 flex flex-col">
+            <div
+              key={c.conversationId}
+              className="p-2 flex flex-col cursor-pointer hover:bg-gray-50 rounded"
+              onClick={() => openConversation(c)}
+            >
               <div className="flex justify-between">
                 {other?.username}
                 <span>{c.online ? "🟢" : "⚫"}</span>
@@ -285,13 +320,112 @@ export default function ChatPage() {
 
       {/* RIGHT PANEL */}
       <div className="flex-1 flex flex-col">
-        <div className="p-4 border-b bg-white font-semibold">
-          {activeConv?.participants.find((p) => p._id !== myId)?.username}
-          {typingUser && (
-            <div className="text-xs text-blue-600 font-semibold">Typing...</div>
+        {/* HEADER */}
+        <div className="p-4 border-b bg-white font-semibold flex justify-between items-center">
+          <div>
+            {activeConv?.participants.find((p) => p._id !== myId)?.username}
+            {typingUser && (
+              <div className="text-xs text-blue-600 font-semibold">
+                Typing...
+              </div>
+            )}
+          </div>
+
+          {/* ANALYZE BUTTON */}
+          {activeConv && (
+            <button
+              onClick={analyzeConversation}
+              disabled={analyzing}
+              className="text-sm px-3 py-1 rounded"
+              style={{
+                background: analyzing ? "#94a3b8" : "#6366f1",
+                color: "white",
+                cursor: analyzing ? "not-allowed" : "pointer",
+              }}
+            >
+              {analyzing ? "Analyzing..." : "🤖 Analyze Conversation"}
+            </button>
           )}
         </div>
 
+        {/* ANALYSIS CARD */}
+        {analysis && (
+          <div
+            style={{
+              margin: "12px 16px",
+              padding: "16px",
+              borderRadius: "12px",
+              background: "#0f172a",
+              color: "white",
+              border: "1px solid #334155",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "13px",
+                color: "#94a3b8",
+                marginBottom: "10px",
+              }}
+            >
+              🤖 AI Coaching Analysis
+            </div>
+
+            {/* SCORE */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+              <div
+                style={{
+                  fontSize: "36px",
+                  fontWeight: "bold",
+                  color: scoreColor(analysis.score),
+                }}
+              >
+                {analysis.score}/10
+              </div>
+              <div style={{ fontSize: "12px", color: "#94a3b8" }}>
+                Communication Score
+              </div>
+            </div>
+
+            {/* KEY MOMENTS */}
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>
+                📌 Key Moments
+              </div>
+              {analysis.keyMoments.map((km, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: "13px",
+                    padding: "6px 10px",
+                    background: "#1e293b",
+                    borderRadius: "6px",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {km}
+                </div>
+              ))}
+            </div>
+
+            {/* COACHING TIP */}
+            <div
+              style={{
+                padding: "10px",
+                background: "#1e3a5f",
+                borderRadius: "8px",
+                fontSize: "13px",
+                borderLeft: "3px solid #3b82f6",
+              }}
+            >
+              <span style={{ color: "#60a5fa", fontWeight: "bold" }}>
+                💡 Coaching Tip:{" "}
+              </span>
+              {analysis.coachingTip}
+            </div>
+          </div>
+        )}
+
+        {/* MESSAGES */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {activeConv &&
             messages[activeConv.conversationId]?.map((m) => (
@@ -317,6 +451,7 @@ export default function ChatPage() {
             ))}
         </div>
 
+        {/* INPUT */}
         <div className="p-4 bg-white flex gap-2">
           <input
             className="flex-1 border rounded px-3 py-2"
